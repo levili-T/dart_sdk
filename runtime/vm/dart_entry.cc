@@ -27,6 +27,10 @@
 
 namespace dart {
 
+// 定义全局变量 是否使用虚拟机
+// 移到此处是因为 dart_api_impl.cc 不在 aotruntime 库中编译
+bool g_use_simulator_excute = false;
+
 DECLARE_FLAG(bool, precompiled_mode);
 
 // A cache of VM heap allocated arguments descriptors.
@@ -105,8 +109,14 @@ static ObjectPtr InvokeDartCode(uword entry_point,
   DartEntryScope dart_entry_scope(thread);
 
   const uword stub = StubCode::InvokeDartCode().EntryPoint();
-#if defined(DART_INCLUDE_SIMULATOR)
-  if (FLAG_use_simulator) {
+
+#if defined(DEBUG_EXTERN_HOTPATCH_LOG)
+  THR_Print("excute: simulator:%d %p callback on isolate %p\\n",
+            g_use_simulator_excute, (void*)stub, (void*)entry_point);
+#endif
+
+  if (g_use_simulator_excute) {
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
     auto invoke = [&](uword entry_point, uword arguments_descriptor,
                       uword arguments, Thread* thread) -> uword {
       return Simulator::Current()->Call(stub, entry_point, arguments_descriptor,
@@ -117,13 +127,34 @@ static ObjectPtr InvokeDartCode(uword entry_point,
         invoke(entry_point, static_cast<uword>(arguments_descriptor.ptr()),
                static_cast<uword>(arguments.ptr()), thread);
     return static_cast<ObjectPtr>(result);
-  }
+#else
+    auto invoke = reinterpret_cast<invokestub>(stub);
+    uword result =
+        invoke(entry_point, static_cast<uword>(arguments_descriptor.ptr()),
+               static_cast<uword>(arguments.ptr()), thread);
+    return static_cast<ObjectPtr>(result);
 #endif
-  auto invoke = reinterpret_cast<invokestub>(stub);
-  uword result =
-      invoke(entry_point, static_cast<uword>(arguments_descriptor.ptr()),
-             static_cast<uword>(arguments.ptr()), thread);
-  return static_cast<ObjectPtr>(result);
+  } else {
+#if defined(DART_INCLUDE_SIMULATOR)
+    if (FLAG_use_simulator) {
+      auto invoke = [&](uword entry_point, uword arguments_descriptor,
+                        uword arguments, Thread* thread) -> uword {
+        return Simulator::Current()->Call(stub, entry_point, arguments_descriptor,
+                                          arguments,
+                                          reinterpret_cast<int64_t>(thread));
+      };
+      uword result =
+          invoke(entry_point, static_cast<uword>(arguments_descriptor.ptr()),
+                 static_cast<uword>(arguments.ptr()), thread);
+      return static_cast<ObjectPtr>(result);
+    }
+#endif
+    auto invoke = reinterpret_cast<invokestub>(stub);
+    uword result =
+        invoke(entry_point, static_cast<uword>(arguments_descriptor.ptr()),
+               static_cast<uword>(arguments.ptr()), thread);
+    return static_cast<ObjectPtr>(result);
+  }
 }
 
 ObjectPtr DartEntry::InvokeFunction(const Function& function,

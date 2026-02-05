@@ -20,12 +20,18 @@
 
 namespace dart {
 
+extern bool g_use_simulator_excute;
+
 void CPU::FlushICache(uword start, uword size) {
 #if defined(DART_PRECOMPILED_RUNTIME)
   UNREACHABLE();
 #else
-#if defined(DART_INCLUDE_SIMULATOR)
-  if (FLAG_use_simulator) {
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
+  if (FLAG_use_simulator
+#if defined(USING_SIMULATOR)
+      || g_use_simulator_excute
+#endif
+  ) {
     return;
   }
 #endif

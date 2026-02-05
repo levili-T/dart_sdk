@@ -33,6 +33,7 @@
 #include "vm/parser.h"
 #include "vm/resolver.h"
 #include "vm/service_isolate.h"
+#include "vm/simulator.h"
 #include "vm/stack_frame.h"
 #include "vm/symbols.h"
 #include "vm/thread.h"
@@ -119,6 +120,8 @@ DECLARE_FLAG(int, reload_every);
 DECLARE_FLAG(bool, reload_every_optimized);
 DECLARE_FLAG(bool, reload_every_back_off);
 
+extern bool g_use_simulator_excute;
+
 uword RuntimeEntry::GetEntryPoint() const {
   // Compute the effective address. When running under the simulator,
   // this is a redirection address that forces the simulator to call
@@ -126,6 +129,22 @@ uword RuntimeEntry::GetEntryPoint() const {
   uword entry = reinterpret_cast<uword>(function());
 #if defined(DART_INCLUDE_SIMULATOR)
   if (FLAG_use_simulator) {
+    // Redirection to leaf runtime calls supports a maximum of 4 arguments
+    // passed in registers (maximum 2 double arguments for leaf float runtime
+    // calls).
+    ASSERT(argument_count() >= 0);
+    ASSERT(!is_leaf() || (!is_float() && (argument_count() <= 4)) ||
+           (argument_count() <= 2));
+    Simulator::CallKind call_kind =
+        is_leaf() ? (is_float() ? Simulator::kLeafFloatRuntimeCall
+                                : Simulator::kLeafRuntimeCall)
+                  : Simulator::kRuntimeCall;
+    entry = Simulator::RedirectExternalReference(entry, call_kind,
+                                                 argument_count());
+  }
+#endif
+#if defined(USING_SIMULATOR)
+  if (g_use_simulator_excute) {
     // Redirection to leaf runtime calls supports a maximum of 4 arguments
     // passed in registers (maximum 2 double arguments for leaf float runtime
     // calls).

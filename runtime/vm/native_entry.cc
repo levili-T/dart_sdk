@@ -21,6 +21,8 @@
 
 namespace dart {
 
+extern bool g_use_simulator_excute;
+
 void DartNativeThrowTypeArgumentCountException(int num_type_args,
                                                int num_type_args_expected) {
   const String& error = String::Handle(String::NewFormatted(
@@ -126,6 +128,13 @@ uword NativeEntry::BootstrapNativeCallWrapperEntry() {
         NativeEntry::kNumCallWrapperArguments);
   }
 #endif
+#if defined(USING_SIMULATOR)
+  if (g_use_simulator_excute) {
+    entry = Simulator::RedirectExternalReference(
+        entry, Simulator::kNativeCallWrapper,
+        NativeEntry::kNumCallWrapperArguments);
+  }
+#endif
   return entry;
 }
 
@@ -172,6 +181,13 @@ uword NativeEntry::NoScopeNativeCallWrapperEntry() {
         NativeEntry::kNumCallWrapperArguments);
   }
 #endif
+#if defined(USING_SIMULATOR)
+  if (g_use_simulator_excute) {
+    entry = Simulator::RedirectExternalReference(
+        entry, Simulator::kNativeCallWrapper,
+        NativeEntry::kNumCallWrapperArguments);
+  }
+#endif
   return entry;
 }
 
@@ -200,6 +216,13 @@ uword NativeEntry::AutoScopeNativeCallWrapperEntry() {
   uword entry = reinterpret_cast<uword>(DRT_AutoScopeNativeCall);
 #if defined(DART_INCLUDE_SIMULATOR)
   if (FLAG_use_simulator) {
+    entry = Simulator::RedirectExternalReference(
+        entry, Simulator::kNativeCallWrapper,
+        NativeEntry::kNumCallWrapperArguments);
+  }
+#endif
+#if defined(USING_SIMULATOR)
+  if (g_use_simulator_excute) {
     entry = Simulator::RedirectExternalReference(
         entry, Simulator::kNativeCallWrapper,
         NativeEntry::kNumCallWrapperArguments);

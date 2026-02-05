@@ -63,7 +63,13 @@
 #include "vm/kernel_loader.h"
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
+intptr_t g_app_base_addr = 0;
+intptr_t g_app_size = 0;
+
 namespace dart {
+
+// 全局变量在 dart_entry.cc 中定义（aotruntime 需要访问）
+extern bool g_use_simulator_excute;
 
 // Facilitate quick access to the current zone once we have the current thread.
 #define Z (T->zone())
@@ -7078,6 +7084,17 @@ DART_EXPORT char* Dart_WriteHeapSnapshot(
 #else
   return Utils::StrDup("VM is built without the heap snapshot writer.");
 #endif
+}
+
+DART_EXPORT void Dart_SetHotPatchExcute(bool hotPatchExcute) {
+  g_use_simulator_excute = hotPatchExcute;
+}
+
+DART_EXPORT bool Dart_GetHotPatchExcute() { return g_use_simulator_excute; }
+
+DART_EXPORT void Dart_SetAppMappingInfo(intptr_t baseAddr, intptr_t size) {
+  g_app_base_addr = baseAddr;
+  g_app_size = size + baseAddr;
 }
 
 }  // namespace dart

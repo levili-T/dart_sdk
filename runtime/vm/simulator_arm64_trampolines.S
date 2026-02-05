@@ -6,7 +6,12 @@
 // we need it be executable in contexts where we cannot JIT. (Alternatively, we
 // could start requiring the VM snapshot to be provided in every mode.)
 
-#if defined(__aarch64__) && defined(SIMULATOR_FFI)
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+// 对于 iOS 构建 (TARGET_OS_IPHONE=1)，启用这个模块以支持 hotpatch
+#if defined(__aarch64__) && (defined(SIMULATOR_FFI) || (defined(__APPLE__) && TARGET_OS_IPHONE))
 
 .text
 
@@ -129,4 +134,4 @@ SimulatorFfiCallbackTrampolineEnd:
 #endif
   brk 0
 
-#endif  // defined(__aarch64__) && defined(SIMULATOR_FFI)
+#endif  // defined(__aarch64__) && (defined(SIMULATOR_FFI) || (defined(__APPLE__) && TARGET_OS_IPHONE))

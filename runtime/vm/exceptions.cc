@@ -27,7 +27,13 @@
 #include "vm/stub_code.h"
 #include "vm/symbols.h"
 
+#if defined(USING_SIMULATOR)
+#include "vm/simulator.h"
+#endif
+
 namespace dart {
+
+extern bool g_use_simulator_excute;
 
 DECLARE_FLAG(bool, trace_deoptimization);
 DEFINE_FLAG(bool,
@@ -616,6 +622,21 @@ NO_SANITIZE_SAFE_STACK  // This function manipulates the safestack pointer.
     ASSERT(thread->execution_state() == Thread::kThreadInNative);
     thread->ExitSafepointFromNative();
     thread->set_execution_state(Thread::kThreadInGenerated);
+  }
+
+  if (g_use_simulator_excute) {
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
+    // Unwinding of the C++ frames and destroying of their stack resources is
+    // done by the simulator, because the target stack_pointer is a simulated
+    // stack pointer and not the C++ stack pointer.
+
+    // Continue simulating at the given pc in the given frame after setting up
+    // the exception object in the kExceptionObjectReg register and the
+    // stacktrace object (may be raw null) in the kStackTraceObjectReg register.
+    Simulator::Current()->JumpToFrame(program_counter, stack_pointer,
+                                      frame_pointer, thread);
+    UNREACHABLE();
+#endif
   }
 
 #if defined(DART_INCLUDE_SIMULATOR)

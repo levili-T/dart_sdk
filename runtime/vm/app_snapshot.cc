@@ -9993,7 +9993,7 @@ ApiErrorPtr FullSnapshotReader::ReadVMSnapshot() {
   ASSERT(Snapshot::IncludesCode(kind_));
   Image image(instructions_image_);
   if (auto const bss = image.bss()) {
-    BSS::Initialize(thread_, bss, /*vm=*/true);
+    // BSS::Initialize(thread_, bss, /*vm=*/true);
   }
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 
@@ -10106,7 +10106,7 @@ void FullSnapshotReader::InitializeBSS() {
   ASSERT(Snapshot::IncludesCode(kind_));
   Image image(instructions_image_);
   if (auto const bss = image.bss()) {
-    BSS::Initialize(thread_, bss, /*vm=*/false);
+    // BSS::Initialize(thread_, bss, /*vm=*/false);
   }
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }

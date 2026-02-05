@@ -9,7 +9,7 @@
 #if defined(TARGET_ARCH_ARM64)
 
 // Only build the simulator if not compiling for real ARM hardware.
-#if defined(DART_INCLUDE_SIMULATOR)
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
 
 #include "vm/simulator.h"
 
@@ -21,7 +21,14 @@
 #include "vm/runtime_entry.h"
 #include "vm/stack_frame.h"
 
+extern intptr_t g_app_base_addr;
+extern intptr_t g_app_size;
+
 namespace dart {
+
+#if defined(USING_SIMULATOR)
+extern bool g_use_simulator_excute;
+#endif
 
 // constants_arm64.h does not define LR constant to prevent accidental direct
 // use of it during code generation. However using LR directly is okay in this
@@ -48,6 +55,14 @@ DEFINE_FLAG(bool, sim_buffer_memory, false, "Simulate weak memory ordering.");
 // OS in the same way as SNPrint is that the Windows C Run-Time
 // Library does not provide vsscanf.
 #define SScanF sscanf  // NOLINT
+
+uint64_t get_tpidrro_el0() {
+  uint64_t value = 0;
+#if defined(HOST_ARCH_ARM64)
+  asm volatile("mrs %0, TPIDRRO_EL0" : "=r"(value));
+#endif
+  return value;
+}
 
 // SimulatorSetjmpBuffer are linked together, and the last created one
 // is referenced by the Simulator. When an exception is thrown, the exception
@@ -1517,7 +1532,13 @@ void Simulator::DecodePCRel(Instr* instr) {
     const uint64_t dest = get_pc() + off;
     set_register(instr, rd, dest, instr->RdMode());
   } else {
-    UnimplementedInstruction(instr);
+    // Format(instr, "adrp 'rd, 'pcrel")
+    const Register rd = instr->RdField();
+    const uint64_t immhi = instr->SImm19Field();
+    const uint64_t immlo = instr->Bits(29, 2);
+    const uint64_t off = ((immhi << 2) | immlo) << 12;
+    const uint64_t dest = (get_pc() & ~0xFFF) + off;
+    set_register(instr, rd, dest, instr->RdMode());
   }
 }
 
@@ -1670,6 +1691,91 @@ static double InvokeFloatLeafRuntime(SimulatorLeafFloatRuntimeCall target,
   return target(d0, d1, d2, d3, d4, d5, d6, d7);
 }
 
+// Calls to all native functions are based on this interface.
+typedef int64_t (*SimulatorAllCallRuntimeCall)(int64_t r0,
+                                               int64_t r1,
+                                               int64_t r2,
+                                               int64_t r3,
+                                               int64_t r4,
+                                               int64_t r5,
+                                               int64_t r6,
+                                               int64_t r7,
+                                               double d0,
+                                               double d1,
+                                               double d2,
+                                               double d3,
+                                               double d4,
+                                               double d5,
+                                               double d6,
+                                               double d7);
+
+// Guard against Clang codegen changes: keep layout stable per-call.
+NO_SANITIZE_UNDEFINED("function") __attribute__((optnone,noinline,disable_tail_calls))
+static int64_t InvokeAllCallRuntime(SimulatorAllCallRuntimeCall target,
+                                    int64_t r0,
+                                    int64_t r1,
+                                    int64_t r2,
+                                    int64_t r3,
+                                    int64_t r4,
+                                    int64_t r5,
+                                    int64_t r6,
+                                    int64_t r7,
+                                    int64_t sp,
+                                    double d0,
+                                    double d1,
+                                    double d2,
+                                    double d3,
+                                    double d4,
+                                    double d5,
+                                    double d6,
+                                    double d7) {
+  intptr_t val = 0;
+#if defined(HOST_ARCH_ARM64)
+  // Reserve a fixed-size scratch area at the top of our frame and populate it
+  // with the caller-provided stack snapshot. This keeps SP management in C and
+  // avoids fragile inline-asm sequences under changing compiler optimizations.
+  const size_t kCopySize = 0x100;  // 256 bytes
+  void* scratch = __builtin_alloca(kCopySize);
+  memcpy(scratch, reinterpret_cast<void*>(sp), kCopySize);
+#else
+  (void)sp;
+#endif
+  val = target(r0, r1, r2, r3, r4, r5, r6, r7, d0, d1, d2, d3, d4, d5, d6, d7);
+  return val;
+}
+
+// Narrow variant with identical calling semantics; keep CG stable.
+NO_SANITIZE_UNDEFINED("function") __attribute__((optnone,noinline,disable_tail_calls))
+static int64_t InvokeAllCallRuntimeL(SimulatorAllCallRuntimeCall target,
+                                     int64_t r0,
+                                     int64_t r1,
+                                     int64_t r2,
+                                     int64_t r3,
+                                     int64_t r4,
+                                     int64_t r5,
+                                     int64_t r6,
+                                     int64_t r7,
+                                     int64_t sp,
+                                     double d0,
+                                     double d1,
+                                     double d2,
+                                     double d3,
+                                     double d4,
+                                     double d5,
+                                     double d6,
+                                     double d7) {
+  intptr_t val = 0;
+#if defined(HOST_ARCH_ARM64)
+  const size_t kCopySize = 0x10;  // 16 bytes
+  void* scratch = __builtin_alloca(kCopySize);
+  memcpy(scratch, reinterpret_cast<void*>(sp), kCopySize);
+#else
+  (void)sp;
+#endif
+  val = target(r0, r1, r2, r3, r4, r5, r6, r7, d0, d1, d2, d3, d4, d5, d6, d7);
+  return val;
+}
+
 // Calls to native Dart functions are based on this interface.
 typedef void (*SimulatorNativeCallWrapper)(Dart_NativeArguments arguments,
                                            Dart_NativeFunction target);
@@ -1730,6 +1836,40 @@ void Simulator::DoRedirectedCall(Instr* instr) {
           InvokeFloatLeafRuntime(target, d0, d1, d2, d3, d4, d5, d6, d7);
       ClobberVolatileRegisters();
       set_vregisterd(V0, 0, bit_cast<int64_t, double>(res));
+      set_vregisterd(V0, 1, 0);
+    } else if (redirection->call_kind() == kNativeCallALLWrapper) {
+      ASSERT((0 <= redirection->argument_count()) &&
+             (redirection->argument_count() <= 8));
+      SimulatorAllCallRuntimeCall target =
+          reinterpret_cast<SimulatorAllCallRuntimeCall>(external);
+      const double d0 = bit_cast<double, int64_t>(get_vregisterd(V0, 0));
+      const double d1 = bit_cast<double, int64_t>(get_vregisterd(V1, 0));
+      const double d2 = bit_cast<double, int64_t>(get_vregisterd(V2, 0));
+      const double d3 = bit_cast<double, int64_t>(get_vregisterd(V3, 0));
+      const double d4 = bit_cast<double, int64_t>(get_vregisterd(V4, 0));
+      const double d5 = bit_cast<double, int64_t>(get_vregisterd(V5, 0));
+      const double d6 = bit_cast<double, int64_t>(get_vregisterd(V6, 0));
+      const double d7 = bit_cast<double, int64_t>(get_vregisterd(V7, 0));
+      const int64_t r0 = get_register(R0);
+      const int64_t r1 = get_register(R1);
+      const int64_t r2 = get_register(R2);
+      const int64_t r3 = get_register(R3);
+      const int64_t r4 = get_register(R4);
+      const int64_t r5 = get_register(R5);
+      const int64_t r6 = get_register(R6);
+      const int64_t r7 = get_register(R7);
+      const int64_t sp = get_register(SP);
+      double result = 0;
+      const int64_t res =
+          InvokeAllCallRuntime(target, r0, r1, r2, r3, r4, r5, r6, r7, sp, d0,
+                               d1, d2, d3, d4, d5, d6, d7);
+
+#if defined(HOST_ARCH_ARM64)
+      asm volatile("str d0, [%0]" : : "r"(&result));
+#endif
+      ClobberVolatileRegisters();
+      set_register(instr, R0, res);
+      set_vregisterd(V0, 0, bit_cast<int64_t, double>(result));
       set_vregisterd(V0, 1, 0);
     } else {
       ASSERT(redirection->call_kind() == kNativeCallWrapper);
@@ -1985,6 +2125,24 @@ void Simulator::DecodeSystem(Instr* instr) {
     return;
   }
 
+  // 解析mrs指令
+  const int op = instr->Bit(31);
+  if (op == 0x1) {
+    const int opc = instr->Bits(30, 2);
+    if (opc == 0x3) {
+      int opc1 = instr->Bits(0, 31);
+      uint32_t sysreg = ((opc1 >> 5) & 0xFFFFF) | ((opc1 >> 22) & 0x7) << 20;
+      opc1 = opc1 >> 5;
+      opc1 &= 0xFFFFF;
+      if (sysreg == 0x49de83) {
+        int64_t val = get_tpidrro_el0();
+        const Register rd = instr->RdField();
+        set_register(instr, rd, val, instr->RdMode());
+        return;
+      }
+    }
+  }
+
   if ((instr->Bits(0, 8) == 0x1f) && (instr->Bits(12, 4) == 2) &&
       (instr->Bits(16, 3) == 3) && (instr->Bits(19, 2) == 0) &&
       (instr->Bit(21) == 0)) {
@@ -2044,9 +2202,54 @@ void Simulator::DecodeUnconditionalBranchReg(Instr* instr) {
         // Format(instr, "blr 'rn");
         const Register rn = instr->RnField();
         const int64_t dest = get_register(rn, instr->RnMode());
-        const int64_t ret = get_pc() + Instr::kInstrSize;
-        set_pc(dest);
-        set_register(instr, LR, ret);
+
+        if (g_app_base_addr != 0 &&
+            (dest < g_app_base_addr || dest > g_app_size)) {
+          // printf("native call: %p\n", (void*)dest);
+          const int32_t* destInstr = reinterpret_cast<const int32_t*>(dest);
+          if (*destInstr != Instr::kSimulatorRedirectInstruction) {
+            SimulatorAllCallRuntimeCall target =
+                reinterpret_cast<SimulatorAllCallRuntimeCall>(dest);
+            const double d0 = bit_cast<double, int64_t>(get_vregisterd(V0, 0));
+            const double d1 = bit_cast<double, int64_t>(get_vregisterd(V1, 0));
+            const double d2 = bit_cast<double, int64_t>(get_vregisterd(V2, 0));
+            const double d3 = bit_cast<double, int64_t>(get_vregisterd(V3, 0));
+            const double d4 = bit_cast<double, int64_t>(get_vregisterd(V4, 0));
+            const double d5 = bit_cast<double, int64_t>(get_vregisterd(V5, 0));
+            const double d6 = bit_cast<double, int64_t>(get_vregisterd(V6, 0));
+            const double d7 = bit_cast<double, int64_t>(get_vregisterd(V7, 0));
+            const int64_t r0 = get_register(R0);
+            const int64_t r1 = get_register(R1);
+            const int64_t r2 = get_register(R2);
+            const int64_t r3 = get_register(R3);
+            const int64_t r4 = get_register(R4);
+            const int64_t r5 = get_register(R5);
+            const int64_t r6 = get_register(R6);
+            const int64_t r7 = get_register(R7);
+            const int64_t sp = get_register(SP);
+            double result = 0;
+            const int64_t res =
+                InvokeAllCallRuntimeL(target, r0, r1, r2, r3, r4, r5, r6, r7,
+                                      sp, d0, d1, d2, d3, d4, d5, d6, d7);
+
+#if defined(HOST_ARCH_ARM64)
+            asm volatile("str d0, [%0]" : : "r"(&result));
+#endif
+            ClobberVolatileRegisters();
+            set_register(instr, R0, res);
+            set_vregisterd(V0, 0, bit_cast<int64_t, double>(result));
+            set_vregisterd(V0, 1, 0);
+          } else {
+            // printf("RedirectedCall: %p\n", (void*)dest);
+            const int64_t ret = get_pc() + Instr::kInstrSize;
+            set_pc(dest);
+            set_register(instr, LR, ret);
+          }
+        } else {
+          const int64_t ret = get_pc() + Instr::kInstrSize;
+          set_pc(dest);
+          set_register(instr, LR, ret);
+        }
         break;
       }
       case 2: {
@@ -4125,6 +4328,6 @@ void Simulator::JumpToFrame(uword pc, uword sp, uword fp, Thread* thread) {
 
 }  // namespace dart
 
-#endif  // !defined(DART_INCLUDE_SIMULATOR)
+#endif  // !defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
 
 #endif  // defined TARGET_ARCH_ARM64

@@ -930,7 +930,7 @@ typedef struct {
   /**
    * A function to be called by the service isolate when it requires the
    * vmservice assets archive. See Dart_GetVMServiceAssetsArchive.
-   * 
+   *
    * This field is deprecated and has no effect.
    */
   Dart_GetVMServiceAssetsArchive get_service_assets;
@@ -4248,5 +4248,20 @@ typedef char* (*Dart_DwarfStackTraceFootnoteCallback)(void* addresses[],
  */
 DART_EXPORT void Dart_SetDwarfStackTraceFootnoteCallback(
     Dart_DwarfStackTraceFootnoteCallback callback);
+
+/**
+ * 设置是否执行热修复
+ */
+DART_EXPORT void Dart_SetHotPatchExcute(bool hotPatchExcute);
+
+/**
+ * 查询执行热修复
+ */
+DART_EXPORT bool Dart_GetHotPatchExcute();
+
+/**
+ * 设置是APP 内存映射范围
+ */
+DART_EXPORT void Dart_SetAppMappingInfo(intptr_t baseAddr, intptr_t size);
 
 #endif /* INCLUDE_DART_API_H_ */ /* NOLINT */

@@ -37,6 +37,10 @@ DECLARE_FLAG(bool, trace_service);
 DECLARE_FLAG(bool, trace_service_verbose);
 #endif  // !defined(PRODUCT)
 
+#if defined(USING_SIMULATOR)
+extern bool g_use_simulator_excute;
+#endif
+
 Thread::~Thread() {
   // We should cleanly exit any isolate before destruction.
   ASSERT(isolate_ == nullptr);
@@ -537,8 +541,12 @@ void Thread::EnterIsolateGroupAsMutator(IsolateGroup* isolate_group,
   thread->SetupDartMutatorStateDependingOnSnapshot(isolate_group);
 
   ResumeThreadInternal(thread);
-#if defined(DART_INCLUDE_SIMULATOR)
-  if (FLAG_use_simulator) {
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
+  if (FLAG_use_simulator
+#if defined(USING_SIMULATOR)
+      || g_use_simulator_excute
+#endif
+  ) {
     thread->SetStackLimit(Simulator::Current()->overflow_stack_limit());
   } else {
     thread->SetStackLimit(OSThread::Current()->overflow_stack_limit());
@@ -589,8 +597,12 @@ void Thread::ResumeDartMutatorThreadInternal(Thread* thread) {
   ResumeThreadInternal(thread);
   if (Dart::vm_isolate() != nullptr &&
       thread->isolate() != Dart::vm_isolate()) {
-#if defined(DART_INCLUDE_SIMULATOR)
-    if (FLAG_use_simulator) {
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
+    if (FLAG_use_simulator
+#if defined(USING_SIMULATOR)
+        || g_use_simulator_excute
+#endif
+    ) {
       thread->SetStackLimit(Simulator::Current()->overflow_stack_limit());
     } else {
       thread->SetStackLimit(OSThread::Current()->overflow_stack_limit());

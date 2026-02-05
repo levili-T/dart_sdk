@@ -33,6 +33,8 @@
 
 namespace dart {
 
+extern bool g_use_simulator_excute;
+
 static constexpr intptr_t kMaxSamplesPerTick = 4;
 
 DEFINE_FLAG(bool, trace_profiled_isolates, false, "Trace profiled isolates.");
@@ -363,9 +365,13 @@ static bool GetAndValidateThreadStackBounds(OSThread* os_thread,
   ASSERT(stack_lower != nullptr);
   ASSERT(stack_upper != nullptr);
 
-#if defined(DART_INCLUDE_SIMULATOR)
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
   const bool use_simulator_stack_bounds =
-      FLAG_use_simulator && thread != nullptr && thread->IsExecutingDartCode();
+      ((FLAG_use_simulator
+#if defined(USING_SIMULATOR)
+        || g_use_simulator_excute
+#endif
+        ) && thread != nullptr && thread->IsExecutingDartCode());
   if (use_simulator_stack_bounds) {
     Isolate* isolate = thread->isolate();
     ASSERT(isolate != nullptr);
@@ -1289,11 +1295,15 @@ static Sample* SetupSample(Thread* thread,
   }
   sample->Init(isolate->main_port(), OS::GetCurrentMonotonicMicros(), tid);
   uword vm_tag = thread->vm_tag();
-#if defined(DART_INCLUDE_SIMULATOR)
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
   // When running in the simulator, the runtime entry function address
   // (stored as the vm tag) is the address of a redirect function.
   // Attempt to find the real runtime entry function address and use that.
-  if (FLAG_use_simulator) {
+  if (FLAG_use_simulator
+#if defined(USING_SIMULATOR)
+      || g_use_simulator_excute
+#endif
+  ) {
     uword redirect_vm_tag = Simulator::FunctionForRedirect(vm_tag);
     if (redirect_vm_tag != 0) {
       vm_tag = redirect_vm_tag;
@@ -1433,8 +1443,12 @@ void Profiler::SampleThread(Thread* thread,
 
   if (in_dart_code) {
     // If we're in Dart code, use the Dart stack pointer.
-#if defined(DART_INCLUDE_SIMULATOR)
-    if (FLAG_use_simulator) {
+#if defined(DART_INCLUDE_SIMULATOR) || defined(USING_SIMULATOR)
+    if (FLAG_use_simulator
+#if defined(USING_SIMULATOR)
+        || g_use_simulator_excute
+#endif
+    ) {
       Simulator* simulator = isolate->simulator();
       sp = simulator->get_register(SPREG);
       fp = simulator->get_register(FPREG);
