@@ -4192,6 +4192,15 @@ int64_t Simulator::Call(int64_t entry,
   // Save the SP register before the call so we can restore it.
   const intptr_t sp_before_call = get_register(R31, R31IsSP);
 
+  // FIX: Save pc_ and pc_modified_ so nested Execute() doesn't corrupt
+  // the outer Execute()'s state. Without this, the inner Execute()'s final
+  // `ret` instruction sets pc_=kEndSimulatingPC and pc_modified_=true,
+  // causing the outer Execute() to exit prematurely after
+  // InstructionDecodeImpl returns (because pc_modified_==true skips the
+  // normal pc_=instr+4 advance, leaving pc_ at kEndSimulatingPC).
+  const uword saved_pc = pc_;
+  const bool saved_pc_modified = pc_modified_;
+
   // Setup parameters.
   if (fp_args) {
     set_vregisterd(V0, 0, parameter0);
@@ -4247,6 +4256,11 @@ int64_t Simulator::Call(int64_t entry,
 
   // Start the simulation.
   Execute();
+
+  // FIX: Restore pc_ and pc_modified_ so the outer Execute()'s
+  // InstructionDecodeImpl can correctly advance pc to instr+4.
+  pc_ = saved_pc;
+  pc_modified_ = saved_pc_modified;
 
   // Check that the callee-saved registers have been preserved,
   // and restore them with the original value.

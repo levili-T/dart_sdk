@@ -48,11 +48,12 @@ int64_t Simulator::Call(int64_t entry,
                         int64_t parameter3,
                         bool fp_return,
                         bool fp_args) {
-  UNIMPLEMENTED();
+  // Not implemented for x64 simulator
+  return 0;
 }
 
 void Simulator::JumpToFrame(uword pc, uword sp, uword fp, Thread* thread) {
-  UNIMPLEMENTED();
+  // Not implemented for x64 simulator
 }
 
 uword Simulator::RedirectExternalReference(uword function,

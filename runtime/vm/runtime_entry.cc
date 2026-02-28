@@ -175,7 +175,8 @@ uword RuntimeEntry::GetEntryPoint() const {
 
 #if defined(DART_INCLUDE_SIMULATOR)
 #define CHECK_SIMULATOR_STACK_OVERFLOW()                                       \
-  if (FLAG_use_simulator && !OSThread::Current()->HasStackHeadroom()) {        \
+  if ((FLAG_use_simulator || g_use_simulator_excute) &&                        \
+      !OSThread::Current()->HasStackHeadroom()) {                              \
     Exceptions::ThrowStackOverflow();                                          \
   }
 #else
@@ -3572,6 +3573,18 @@ DEFINE_RUNTIME_ENTRY(InterruptOrStackOverflow, 0) {
     }
   }
 #endif
+
+#if defined(USING_SIMULATOR)
+  if (g_use_simulator_excute) {
+    stack_pos = Simulator::Current()->get_sp();
+    // If simulator was never called it may return 0 as a value of SPREG.
+    if (stack_pos == 0) {
+      // Use any reasonable value which would not be treated
+      // as stack overflow.
+      stack_pos = thread->saved_stack_limit();
+    }
+  }
+#endif
   // Always clear the stack overflow flags.  They are meant for this
   // particular stack overflow runtime call and are not meant to
   // persist.
@@ -4471,6 +4484,13 @@ uword RuntimeEntry::InterpretCallEntry() {
   uword entry = reinterpret_cast<uword>(InterpretCall);
 #if defined(DART_INCLUDE_SIMULATOR)
   if (FLAG_use_simulator) {
+    entry = Simulator::RedirectExternalReference(
+        entry, Simulator::kLeafRuntimeCall, 5);
+  }
+#endif
+
+#if defined(USING_SIMULATOR)
+  if (g_use_simulator_excute) {
     entry = Simulator::RedirectExternalReference(
         entry, Simulator::kLeafRuntimeCall, 5);
   }
